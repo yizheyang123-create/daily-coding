@@ -1,0 +1,49 @@
+name: 断更检测
+
+on:
+  schedule:
+    # 每天早上 8 点（UTC+8 的 0 点 UTC）
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  check-streak:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 检测昨天是否有提交
+        run: |
+          YESTERDAY=$(date -d "yesterday" +%Y-%m-%d)
+          echo "检查日期：$YESTERDAY"
+          COMMITS=$(git log --after="${YESTERDAY} 00:00:00 +0800" --before="${YESTERDAY} 23:59:59 +0800" --oneline)
+          if [ -z "$COMMITS" ]; then
+            echo "❌ 昨天没有提交！断更了！"
+            echo "STREAK_BROKEN=true" >> $GITHUB_ENV
+          else
+            echo "✅ $YESTERDAY 有提交，打卡成功"
+            echo "STREAK_BROKEN=false" >> $GITHUB_ENV
+            echo "提交记录："
+            echo "$COMMITS"
+          fi
+
+      - name: 断更时创建 Issue 警告
+        if: env.STREAK_BROKEN == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ 断更警告：${yesterday} 没有打卡！`,
+              body: `## 🚨 你昨天（${yesterday}）没有提交代码！
+
+            根据规则，断更一次：
+            - 发红包 10 元 / 断碳水一天 / 小甜水不喝卡（三选一）
+
+            💪 今天补上还来得及！`
+            });
